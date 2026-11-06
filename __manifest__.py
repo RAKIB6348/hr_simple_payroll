@@ -15,14 +15,15 @@ Long description of module's purpose
     # Check https://github.com/odoo/odoo/blob/15.0/odoo/addons/base/data/ir_module_category_data.xml
     # for the full list
     'category': 'Uncategorized',
-    'version': '0.1',
+    'version': '0.2',
 
     # any module necessary for this one to work correctly
-    'depends': ['base'],
+    'depends': ['base', 'hr', 'hr_contract'],
 
     # always loaded
     'data': [
         'security/ir.model.access.csv',
+        'security/payroll_security.xml',
         'views/views.xml',
         'views/templates.xml',
     ],

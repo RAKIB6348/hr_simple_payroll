@@ -7,7 +7,6 @@
       <field name="arch" type="xml">
         <tree>
           <field name="name"/>
-          <field name="employee_name"/>
           <field name="date"/>
           <field name="amount"/>
           <field name="state"/>
@@ -22,13 +21,17 @@
       <field name="arch" type="xml">
         <form>
           <header>
+            <button name="action_generate_employees"
+                    type="object"
+                    string="Generate Employees"
+                    class="oe_highlight"
+                    invisible="state != 'draft'"/>
             <field name="state" widget="statusbar"/>
           </header>
           <sheet>
             <group>
               <group>
                 <field name="name"/>
-                <field name="employee_name"/>
                 <field name="month"/>
                 <field name="year"/>
               </group>
@@ -40,6 +43,20 @@
                 <field name="amount"/>
               </group>
             </group>
+            <notebook>
+              <page string="Employee Salary Lines" name="employee_salary_lines">
+                <field name="line_ids" readonly="state != 'draft'">
+                  <tree editable="bottom">
+                    <field name="employee_id"/>
+                    <field name="currency_id" column_invisible="1"/>
+                    <field name="wage"/>
+                  </tree>
+                </field>
+                <group>
+                  <field name="total_wage"/>
+                </group>
+              </page>
+            </notebook>
           </sheet>
         </form>
       </field>

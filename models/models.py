@@ -3,7 +3,8 @@
 import calendar
 from datetime import date
 
-from odoo import api, fields, models
+from odoo import Command, _, api, fields, models
+from odoo.exceptions import UserError
 
 
 class HrSimplePayslip(models.Model):
@@ -17,7 +18,7 @@ class HrSimplePayslip(models.Model):
         copy=False,
         default='New',
     )
-    employee_name = fields.Char(string='Employee', required=True)
+    employee_name = fields.Char(string='Employee')
     date = fields.Date(
         string='Date',
         required=True,
@@ -58,6 +59,12 @@ class HrSimplePayslip(models.Model):
         help='Last day of the payroll period.',
     )
 
+    line_ids = fields.One2many(
+        comodel_name='hr.simple.payslip.line',
+        inverse_name='payslip_id',
+        string='Employee Salary Lines',
+    )
+
     currency_id = fields.Many2one(
         'res.currency',
         string='Currency',
@@ -66,6 +73,14 @@ class HrSimplePayslip(models.Model):
     )
     amount = fields.Monetary(
         string='Amount',
+        compute='_compute_amount',
+        store=True,
+        currency_field='currency_id',
+    )
+    total_wage = fields.Monetary(
+        string='Total Wage',
+        compute='_compute_total_wage',
+        store=True,
         currency_field='currency_id',
     )
     state = fields.Selection(
@@ -128,3 +143,153 @@ class HrSimplePayslip(models.Model):
                 if not vals.get('date_to'):
                     vals['date_to'] = date_to
         return super().create(vals_list)
+
+    @api.depends('line_ids.wage')
+    def _compute_total_wage(self):
+        for payslip in self:
+            payslip.total_wage = sum(payslip.line_ids.mapped('wage'))
+
+    @api.depends('total_wage')
+    def _compute_amount(self):
+        for payslip in self:
+            payslip.amount = payslip.total_wage
+
+    def _get_applicable_contract(self, employee):
+        """Return the contract applicable to this payslip's period.
+
+        A contract is applicable when it is running/closed (not draft or
+        cancelled) and its date range overlaps the payroll period. When
+        several match, the most recently started one wins.
+        """
+        self.ensure_one()
+        contracts = employee.contract_ids.filtered(
+            lambda contract: contract.state in ('open', 'close')
+            and (not contract.date_start or contract.date_start <= self.date_to)
+            and (not contract.date_end or contract.date_end >= self.date_from)
+        )
+        return contracts.sorted(
+            key=lambda contract: (contract.date_start or date.min, contract.id),
+            reverse=True,
+        )[:1]
+
+    def action_generate_employees(self):
+        """Populate salary lines from employees' applicable contracts."""
+        self.ensure_one()
+
+        if not self.id:
+            raise UserError(_(
+                'Please save the payslip before generating employees.'
+            ))
+        if self.state != 'draft':
+            raise UserError(_(
+                'Employees can only be generated for a payslip in Draft state.'
+            ))
+        if not self.date_from or not self.date_to:
+            raise UserError(_(
+                'Please select a payroll period (Month and Year) first.'
+            ))
+        if self.date_from > self.date_to:
+            raise UserError(_(
+                'Date From must be earlier than or equal to Date To.'
+            ))
+
+        employees = self.env['hr.employee'].search([
+            ('active', '=', True),
+            ('company_id', 'in', self.env.companies.ids),
+        ], order='name')
+
+        existing_employee_ids = set(self.line_ids.employee_id.ids)
+        commands = []
+        skipped = self.env['hr.employee']
+
+        for employee in employees:
+            if employee.id in existing_employee_ids:
+                continue
+            contract = self._get_applicable_contract(employee)
+            if not contract:
+                skipped |= employee
+                continue
+            commands.append(Command.create({
+                'employee_id': employee.id,
+                'wage': contract.wage,
+            }))
+            existing_employee_ids.add(employee.id)
+
+        if commands:
+            self.write({'line_ids': commands})
+
+        if skipped:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('Employees skipped'),
+                    'message': _(
+                        'No applicable contract was found for: %s',
+                        ', '.join(skipped.mapped('name')),
+                    ),
+                    'type': 'warning',
+                    'sticky': False,
+                },
+            }
+        if not commands:
+            return {
+                'type': 'ir.actions.client',
+                'tag': 'display_notification',
+                'params': {
+                    'title': _('No changes'),
+                    'message': _('No new employees were added.'),
+                    'type': 'info',
+                    'sticky': False,
+                },
+            }
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Employees generated'),
+                'message': _('%s employee(s) added.', len(commands)),
+                'type': 'success',
+                'sticky': False,
+            },
+        }
+
+
+class HrSimplePayslipLine(models.Model):
+    _name = 'hr.simple.payslip.line'
+    _description = 'Payslip Employee Salary Line'
+    _order = 'id'
+
+    payslip_id = fields.Many2one(
+        comodel_name='hr.simple.payslip',
+        string='Payslip',
+        required=True,
+        ondelete='cascade',
+        index=True,
+    )
+    employee_id = fields.Many2one(
+        comodel_name='hr.employee',
+        string='Employee',
+        required=True,
+        ondelete='restrict',
+        index=True,
+    )
+    currency_id = fields.Many2one(
+        comodel_name='res.currency',
+        string='Currency',
+        related='payslip_id.currency_id',
+        readonly=True,
+    )
+    wage = fields.Monetary(
+        string='Wage',
+        required=True,
+        currency_field='currency_id',
+    )
+
+    _sql_constraints = [
+        (
+            'payslip_employee_uniq',
+            'unique(payslip_id, employee_id)',
+            'An employee can only be added once per payslip.',
+        ),
+    ]

@@ -1,0 +1,11 @@
+<odoo>
+  <data>
+    <!-- Salary lines follow the company of their employee. -->
+    <record id="rule_hr_simple_payslip_line_company" model="ir.rule">
+      <field name="name">Payslip salary line: multi-company</field>
+      <field name="model_id" ref="model_hr_simple_payslip_line"/>
+      <field name="domain_force">[('employee_id.company_id', 'in', company_ids + [False])]</field>
+      <field name="global" eval="True"/>
+    </record>
+  </data>
+</odoo>
