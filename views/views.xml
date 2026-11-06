@@ -29,8 +29,12 @@
               <group>
                 <field name="name"/>
                 <field name="employee_name"/>
+                <field name="month"/>
+                <field name="year"/>
               </group>
               <group>
+                <field name="date_from"/>
+                <field name="date_to"/>
                 <field name="date"/>
                 <field name="currency_id" invisible="1"/>
                 <field name="amount"/>
